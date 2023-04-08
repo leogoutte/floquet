@@ -235,3 +235,9 @@ def PhotocurrentArrayWKCircular_polarized(sigma,k_dir,k_other,k_bounds,wp_bounds
 
 
 
+
+
+
+
+
+

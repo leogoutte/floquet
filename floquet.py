@@ -235,6 +235,54 @@ def PhotocurrentArrayWKCircular_polarized(sigma,k_dir,k_other,k_bounds,wp_bounds
 
 
 
+### FLOQUET UNITARY
+def HamiltonianT(t,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar=1):
+    """
+    time-dependent Hamiltonian
+    """
+    kx = kx - eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.cos(Omega*t)
+    ky = ky + eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.sin(Omega*t)
+    H = D * (kx**2 + ky**2) * s0 + A * (kx * s2 - ky * s1) - mu * s0
+
+    return H
+
+def FloquetUnitary(T,N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar):
+    """
+    define floquet unitary
+    """
+    dt = T/N # time step
+    U = np.eye(2)
+
+    for i in range(N):
+        t_star = t + dt/2 # for better results, presumably
+        H = HamiltonianT(t=t_star,kx=kx,ky=ky,A=A,D=D,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+        U_ = np.exp(-1j * H * dt / hbar)
+        U *= U_
+
+    return U
+
+def FloquetEnergies(T,N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar):
+    """
+    compute floquet energies
+    """
+    U = FloquetUnitary(T,N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar)
+    U_diags = np.linalg.eigvals(U)
+    Es = 1j * np.log(U_diags)
+
+    return Es
+
+def FloquetEnergiesArray(res,T,N,ky,A,D,mu,eE0,Omega,Tpump,hbar):
+    """
+    energies as a function of kx
+    """
+    ks = np.linspace(-0.1,0.1,res)
+    Es = np.zeros((res,2), dtype=float)
+
+    for i,k in enumerate(ks):
+        E = FloquetEnergies(T=T,N=N,kx=k,ky=ky,A=A,D=D,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+        Es[i,:] = E
+
+    return np.repeat(ks,2), Es
 
 
 

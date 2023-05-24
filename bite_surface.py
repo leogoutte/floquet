@@ -296,18 +296,18 @@ def spectral_function_plot_open(size,res,w_range,ky,A1,B1,A2,B2,C,D1,D2,M,R1,R2,
     return As
 
 # surface theory results
-def hamiltonian_3DTI_surface(kx,ky,A1,B1,A2,B2,C,D1,D2,M,R1,R2):
+def hamiltonian_3DTI_surface(kx,ky,A,D,R):
     """
     hamiltonian for the surface of a 3DTI
     """
     kplus = np.sin(kx)+1j*np.sin(ky)
     kminus = np.sin(kx)-1j*np.sin(ky)
     kp2 = 4-2*(np.cos(kx)+np.cos(ky))
-    H = (C + D2*(kp2))*s0 + A2*(np.sin(kx)*s1 + np.sin(ky)*s2) + R1/2*(kplus**3+kminus**3)*s3
+    H = D*(kp2)*s0 + A*(np.sin(kx)*s1 + np.sin(ky)*s2) + R/2*(kplus**3+kminus**3)*s3
 
     return H
 
-def spectrum_3DTI_surface(ky,A1,B1,A2,B2,C,D1,D2,M,R1,R2):
+def spectrum_3DTI_surface(ky,A,D,R):
     res = 1000
     s = 2
     ks = np.linspace(-1,1,res)
@@ -315,16 +315,13 @@ def spectrum_3DTI_surface(ky,A1,B1,A2,B2,C,D1,D2,M,R1,R2):
     
     for i in range(res):
         k = ks[i]
-        H = hamiltonian_3DTI_surface(kx=k,ky=ky,A1=A1,B1=B2,A2=A2,B2=B2,C=C,D1=D1,D2=D2,M=M,R1=R1,R2=R2)
+        H = hamiltonian_3DTI_surface(kx=k,ky=ky,A=A,D=D,R=R)
         E = np.linalg.eigvalsh(H)
         Es[i*s:(i+1)*s] = E
 
     ks_ret = np.repeat(ks,s)
     
     return ks_ret,Es
-
-
-
 
 
 

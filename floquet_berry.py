@@ -111,16 +111,16 @@ def States(res,band,N,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
             H = 1j * hbar * logm(expm(-1j/hbar*(H_)))
             # H = 2*D*(2-np.cos(kx)-np.cos(ky))*s0 + (np.sin(kx)*s2 - np.sin(ky)*s1) + (1-np.cos(kx)-np.cos(ky))*s3
             # H = (np.sin(kx)*s2 - np.sin(ky)*s1) + (1-np.cos(kx)-np.cos(ky))*s3
-            # _, waves = np.linalg.eig(H_)
-            # states[i,j,:] = waves[:,band]
-            d1,d2,d3 = dvector(H,norm=False)
-            d1_,d2_,d3_ = dvector(H_,norm=False)
-            print(d1-d1_)
-            print(d2-d2_)
-            print(d3-d3_)
+            _, waves = np.linalg.eig(H_)
+            states[i,j,:] = waves[:,band]
+            # d1,d2,d3 = dvector(H,norm=False)
+            # d1_,d2_,d3_ = dvector(H_,norm=False)
+            # print(d1-d1_)
+            # print(d2-d2_)
+            # print(d3-d3_)
             # print(H-H_)
-            d = np.sqrt(d1**2+d2**2+d3**2)
-            states[i,j,:] = np.array([d3+d,d1+1j*d2])  / np.sqrt(2*d**2 + 2*d3*d)
+            # d = np.sqrt(d1**2+d2**2+d3**2)
+            # states[i,j,:] = np.array([d3+d,d1+1j*d2])  / np.sqrt(2*d**2 + 2*d3*d)
 
     return states
 

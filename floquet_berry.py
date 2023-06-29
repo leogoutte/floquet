@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import expm, logm
 
 hbar = 0.6582119569 # ev * fs
 
@@ -43,22 +44,83 @@ def BulkModel(ms,kx,ky,A2,D2,mu,eE0,Omega):
     
     return H
 
-def States(res,band,ms,A2,D2,mu,eE0,Omega):
+def dvector(H,norm=True):
+    """
+    Returns the d-vector for a 2x2 Hermitian Hamiltonian
+    """
+    top = H[0,1]
+    dx = np.real(top)
+    dy = -np.imag(top)
+    dz = (H[0,0]-H[1,1])/2
+    d0 = (H[0,0]+H[1,1])/2
+    dx = np.real(dx)
+    dy = np.real(dy)
+    dz = np.real(dz)
+    if norm:
+        norm = np.sqrt(dx**2+dy**2+dz**2)
+        return np.array([dx/norm,dy/norm,dz/norm],dtype=float)
+    else:
+        return np.array([dx,dy,dz],dtype=float)
+
+def HamiltonianPeriodic(t,kx,ky,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
+    """
+    Hamiltonian for the periodic system
+    """
+    # kx = kx - eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.cos(Omega*t)
+    # ky = ky + eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.sin(Omega*t)
+    # H = A*(np.sin(kx)*s2 - np.sin(ky)*s1) + 2*D*(2-np.cos(kx)-np.cos(ky))*s0 + 2*B*(2 - M/(2*B) - np.cos(kx) - np.cos(ky))*s3 - mu*s0
+    H = 2*D*(2-np.cos(kx)-np.cos(ky))*s0 + (np.sin(kx)*s2 - np.sin(ky)*s1) + (1-np.cos(kx)-np.cos(ky))*s3
+
+    return H
+
+def HFPeriodic(N,kx,ky,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
+    """
+    define floquet unitary
+    """
+    T = 2*np.pi/Omega
+    dt = T/N # time step
+    U = np.array([[1,0],[0,1]],dtype=complex)
+
+    for i in range(N):
+        t_star = dt*i # for better results, presumably
+        H = HamiltonianPeriodic(t=t_star,kx=kx,ky=ky,A=A,B=B,D=D,M=M,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+        U_ = expm(-1j * H * dt / hbar)
+        U = U_ @ U
+
+    HF = 1j * hbar / T * logm(U)
+
+    return HF
+
+def States(res,band,N,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
     """
     Returns a grid of states
-    3 dimensions: [kx,ky, 4 band]
-    band is band index
-    band index runs from 0 to 3, with 0 being the lowest energy band and 3 the highest
+    4 dimensions: [kx,ky, 2 band]
+    occ is True (occupied band) or False (valence band)
     """
-    bands = int(4*ms)
+    bands = 2
+    ks = np.linspace(-np.pi,np.pi,res)
     states = np.zeros((res,res,bands),dtype=complex)
+    T = 2*np.pi/Omega
 
     for i in range(res):
-        kx = -np.pi + i * 2 * np.pi / res 
+        kx = ks[i]
         for j in range(res):
-            ky = -np.pi + j * 2 * np.pi / res 
-            _, waves = np.linalg.eigh(BulkModel(ms=ms,kx=kx,ky=ky,A2=A2,D2=D2,mu=mu,eE0=eE0,Omega=Omega))
-            states[i,j,:] = waves[:,band]
+            ky = ks[j]
+            # H = HFPeriodic(N=N,kx=kx,ky=ky,A=A,B=B,D=D,M=M,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+            H_ = np.sin(kx)*s2 - np.sin(ky)*s1 + (1-np.cos(kx)-np.cos(ky))*s3
+            H = 1j * hbar * logm(expm(-1j/hbar*(H_)))
+            # H = 2*D*(2-np.cos(kx)-np.cos(ky))*s0 + (np.sin(kx)*s2 - np.sin(ky)*s1) + (1-np.cos(kx)-np.cos(ky))*s3
+            # H = (np.sin(kx)*s2 - np.sin(ky)*s1) + (1-np.cos(kx)-np.cos(ky))*s3
+            # _, waves = np.linalg.eig(H_)
+            # states[i,j,:] = waves[:,band]
+            d1,d2,d3 = dvector(H,norm=False)
+            d1_,d2_,d3_ = dvector(H_,norm=False)
+            print(d1-d1_)
+            print(d2-d2_)
+            print(d3-d3_)
+            # print(H-H_)
+            d = np.sqrt(d1**2+d2**2+d3**2)
+            states[i,j,:] = np.array([d3+d,d1+1j*d2])  / np.sqrt(2*d**2 + 2*d3*d)
 
     return states
 
@@ -84,15 +146,34 @@ def BerryFlux(n,m,states,res):
 
     return np.arctan2(W.imag,W.real) # might be a minus sign in front
 
-def ChernNumber(res,band,ms,A2,D2,mu,eE0,Omega):
+def uij(u,v):
+    """
+    Computes overlap of wavefunctions u, v
+    """
+    return np.dot(np.conjugate(u),v)
+
+def BerryFlux(n,m,states,res):
+    """
+    Computes product
+    <u_{n,m}|u_{n+1,m}><u_{n+1,m}|u_{n+1,m+1}><u_{n+1,m+1}|u_{n,m+1}><u_{n,m+1}|u_{n,m}>
+    Returns the Wilson loop for a given kz
+    """
+    # for a given kz
+    # product over neighbouring sites
+    # imposing pbc by virtue of remainder division %
+    W = uij(states[n,m,:],states[(n+1)%res,m,:]) 
+    W *= uij(states[(n+1)%res,m,:],states[(n+1)%res,(m+1)%res,:])
+    W *= uij(states[(n+1)%res,(m+1)%res,:],states[n,(m+1)%res,:])
+    W *= uij(states[n,(m+1)%res,:],states[n,m,:])
+
+    return np.arctan2(W.imag,W.real) # might be a minus sign in front
+
+def ChernNumber(states,res):
     """
     Discrete sum over all plaquettes (n,m)
     """
     # Chern numbers
     Q = 0
-
-    # states
-    states = States(res=res,band=band,ms=ms,A2=A2,D2=D2,mu=mu,eE0=eE0,Omega=Omega)
 
     # Sum over all plaquettes
     for n in range(res):
@@ -102,7 +183,7 @@ def ChernNumber(res,band,ms,A2,D2,mu,eE0,Omega):
     
     Q /= 2 * np.pi
 
-    return Q
+    return np.around(Q,2)
 
 # def ChernNumber(res,band,A2,D2,mu,eE0,Omega):
 #     """

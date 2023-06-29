@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import expm, logm
 from scipy.integrate import solve_ivp
 from scipy.integrate import simpson
 from scipy.special import jv # bessel function of the first kind
@@ -242,36 +243,55 @@ def HamiltonianT(t,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar=1):
     """
     kx = kx - eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.cos(Omega*t)
     ky = ky + eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.sin(Omega*t)
-    H = D * (kx**2 + ky**2) * s0 + A * (kx * s2 - ky * s1) - mu * s0
+    H = D * (kx**2 + ky**2) * s0 + A * (kx * s2 - ky * s1) - mu * s0 + 0.1*s3
 
     return H
 
-def FloquetUnitary(T,N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar):
+def HamiltonianTm(t,kx,ky,A,D,mu,m,T,Tpump,hbar=1):
+    """
+    time-dependent Hamiltonian
+    """
+    # get t reduced to set the "mass"
+    t_dim = t%T
+    if t_dim < T/2:
+        H = D * (kx**2 + ky**2) * s0 + A * (kx * s2 - ky * s1) - mu * s0
+    else:
+        m = m * s3
+        H_bump = m #* np.exp(-t**2/(2*Tpump**2))
+        A = 0
+        H = D * (kx**2 + ky**2) * s0 + A * (kx * s2 - ky * s1) - mu * s0 + H_bump # note the *0 next to A
+
+    return H
+
+def FloquetUnitary(N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar):
     """
     define floquet unitary
     """
+    T = 2*np.pi/Omega
     dt = T/N # time step
-    U = np.eye(2)
+    U = np.array([[1,0],[0,1]],dtype=complex)
 
     for i in range(N):
-        t_star = t + dt/2 # for better results, presumably
-        H = HamiltonianT(t=t_star,kx=kx,ky=ky,A=A,D=D,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
-        U_ = np.exp(-1j * H * dt / hbar)
-        U *= U_
+        t_star = dt*i 
+        # H = HamiltonianT(t=t_star,kx=kx,ky=ky,A=A,D=D,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+        H = HamiltonianTm(t=t_star,kx=kx,ky=ky,A=A,D=D,mu=mu,m=0.1,T=T,Tpump=Tpump,hbar=hbar)
+        U_ = expm(-1j * H * dt / hbar)
+        U = U @ U_
 
     return U
 
-def FloquetEnergies(T,N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar):
+def FloquetEnergies(N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar):
     """
     compute floquet energies
     """
-    U = FloquetUnitary(T,N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar)
-    U_diags = np.linalg.eigvals(U)
-    Es = 1j * np.log(U_diags)
+    T = 2*np.pi/Omega
+    U = FloquetUnitary(N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar)
+    HF = 1j * hbar / T * logm(U)
+    Es =  np.linalg.eigvalsh(HF)
 
     return Es
 
-def FloquetEnergiesArray(res,T,N,ky,A,D,mu,eE0,Omega,Tpump,hbar):
+def FloquetEnergiesArray(res,N,ky,A,D,mu,eE0,Omega,Tpump,hbar):
     """
     energies as a function of kx
     """
@@ -279,11 +299,147 @@ def FloquetEnergiesArray(res,T,N,ky,A,D,mu,eE0,Omega,Tpump,hbar):
     Es = np.zeros((res,2), dtype=float)
 
     for i,k in enumerate(ks):
-        E = FloquetEnergies(T=T,N=N,kx=k,ky=ky,A=A,D=D,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
-        Es[i,:] = E
+        E = FloquetEnergies(N=N,kx=k,ky=ky,A=A,D=D,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+        Es[i,:] = np.real(E)
 
     return np.repeat(ks,2), Es
 
+
+### BERRY CURVATURE PROGRAM
+
+def HF_array(res,N,A,D,mu,eE0,Omega,Tpump,hbar):
+    """
+    Makes array of HF (kxs, kys).
+    kxs are rows, kys are columns.
+    """
+    T = 2*np.pi/Omega
+    ks = np.linspace(-0.3,0.3,num=res)
+    dk = ks[1]-ks[0]
+
+    HFs = np.zeros((res,res,2,2),dtype=complex)
+
+    for i,kx in enumerate(ks):
+        for j,ky in enumerate(ks):
+            HFs[i,j,:,:] = 1j * hbar / T * logm(FloquetUnitary(N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar))
+
+    return HFs
+
+def HF_array_derivatives(HFs,dk):
+    """
+    Derivatives of HF array
+    might have to do by hand (potential source of error)
+    """
+    all_derivatives = np.gradient(HFs,dk) # the last two elements of all_derivatives are not important (D along Hamiltonian elements)
+    HFs_dkx = all_derivatives[0]
+    HFs_dky = all_derivatives[1]
+
+    return HFs_dkx, HFs_dky
+
+# doesn't work too well (possibly because of gauge problems)
+def Berry_curvature(HFs,HFs_dkx,HFs_dky):
+    """
+    Compute Berry curvature as a sum over the eigenstates
+    """
+    res = HFs.shape[0]
+    ks = np.linspace(-0.3,0.3,num=res)
+    dk = ks[1]-ks[0]
+
+    BCs = np.zeros((res,res),dtype=float)
+
+    for i,kx in enumerate(ks):
+        for j,ky in enumerate(ks):
+            HF = HFs[i,j,:,:]
+            HF_dkx = HFs_dkx[i,j,:,:]
+            HF_dky = HFs_dky[i,j,:,:]
+
+            es, kets = np.linalg.eig(HF) 
+            ket_prime, ket = kets # choose ket to be state of lowest energy band (n and not n')
+
+            BC = 1j / (es[1]-es[0])**2 * ((ket.conj().T @ HF_dkx @ ket_prime) * (ket_prime.conj().T @ HF_dky @ ket) - (ket.conj().T @ HF_dky @ ket_prime) * (ket_prime.conj().T @ HF_dkx @ ket))
+            BCs[i,j] = np.real(BC)
+
+    return BCs
+
+def dvector(H):
+    """
+    Returns the d-vector for a 2x2 Hermitian Hamiltonian
+    """
+    top = H[0,1]
+    dx = np.real(top)
+    dy = -np.imag(top)
+    dz = (H[0,0]-H[1,1])/2
+    d0 = (H[0,0]+H[1,1])/2
+    dx = np.real(dx)
+    dy = np.real(dy)
+    dz = np.real(dz)
+    norm = np.sqrt(dx**2+dy**2+dz**2)
+
+    return np.array([dx/norm,dy/norm,dz/norm],dtype=float)
+
+def plot_dvector(res,N,A,D,mu,eE0,Omega,Tpump,hbar):
+    """
+    Plots d-vector for HF in the brillouin zone
+    """
+    T = 2*np.pi/Omega
+    ks = np.linspace(-0.1,0.1,num=res)
+    dk = ks[1]-ks[0]
+
+    dvecs = np.zeros((res,res,3),dtype=float)
+
+    for i,ky in enumerate(ks): # ky are the rows
+        for j,kx in enumerate(ks): # kx are the columns
+            HF = 1j * hbar / T * logm(FloquetUnitary(N,kx,ky,A,D,mu,eE0,Omega,Tpump,hbar))
+            # HF = A * (kx * s2 - ky * s1) - mu * s0 + 0.1*s3
+            # HF = kx*s1+ky*s2
+            dvec = dvector(HF)
+            dvecs[i,j,:] = dvec
+
+    return dvecs
+
+# periodic function
+def HamiltonianPeriodic(t,kx,ky,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
+    """
+    Hamiltonian for the periodic system
+    """
+    kx = kx - eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.cos(Omega*t)
+    ky = ky + eE0/(hbar*Omega) * np.exp(-t**2/(2*Tpump**2)) * np.sin(Omega*t)
+    H = A*(np.sin(kx)*s2 - np.sin(ky)*s1) + 2*D*(2-np.cos(kx)-np.cos(ky))*s0 + 2*B*(-M/(2*B) - np.cos(kx) - np.cos(ky))*s3 - mu*s0
+
+    return H
+
+def FloquetUnitaryPeriodic(N,kx,ky,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
+    """
+    define floquet unitary
+    """
+    T = 2*np.pi/Omega
+    dt = T/N # time step
+    U = np.array([[1,0],[0,1]],dtype=complex)
+
+    for i in range(N):
+        t_star = dt*i # for better results, presumably
+        H = HamiltonianPeriodic(t=t_star,kx=kx,ky=ky,A=A,B=B,D=D,M=M,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar)
+        U_ = expm(-1j * H * dt / hbar)
+        U = U_ @ U
+
+    return U
+
+def SpectrumPeriodic(res,krange,N,ky,A,B,D,M,mu,eE0,Omega,Tpump,hbar):
+    """
+    Spectrum along kx for the periodic Hamiltonia
+    """
+    ks = np.linspace(-krange,krange,res)
+    ks_ret = np.zeros(2*res,dtype=float)
+    Es = np.zeros(2*res,dtype=float)
+
+    for i in range(res):
+        kx = ks[i]
+        # H = 1j*hbar / (2*np.pi/Omega) * logm(FloquetUnitaryPeriodic(N=N,kx=kx,ky=ky,A=A,B=B,D=D,M=M,mu=mu,eE0=eE0,Omega=Omega,Tpump=Tpump,hbar=hbar))
+        H = A*(np.sin(kx)*s2 - np.sin(ky)*s1) + A*(1 - np.cos(kx) - np.cos(ky))*s3
+        E, Ws = np.linalg.eigh(H)
+        Es[i*2:(i+1)*2] = E
+        ks_ret[i*2:(i+1)*2] = np.repeat(kx,2)
+
+    return ks_ret, Es
 
 
 
